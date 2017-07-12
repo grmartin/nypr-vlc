@@ -42,12 +42,20 @@
 #include <gnutls/gnutls.h>
 #include <gnutls/x509.h>
 
+static void nypr_gnutlsLog(int level, const char* log);
+static void nypr_gnutlsAuditLog(gnutls_session_t sess, const char* log);
+
+#define NYPR_LOG_LEVEL_SWITCH "gnutls-nypr-loglevel"
+#define NYPR_AUDITLOG_SWITCH "gnutls-nypr-audit-log"
+
 typedef struct vlc_tls_gnutls
 {
     vlc_tls_t tls;
     gnutls_session_t session;
     vlc_object_t *obj;
 } vlc_tls_gnutls_t;
+
+static vlc_object_t *globalContext;
 
 static int gnutls_Init (vlc_object_t *obj)
 {
@@ -58,7 +66,29 @@ static int gnutls_Init (vlc_object_t *obj)
         return -1;
     }
     msg_Dbg (obj, "using GnuTLS version %s", version);
+
+    globalContext = obj;
+
+    int logLevel =  var_InheritInteger(obj, NYPR_LOG_LEVEL_SWITCH);
+
+    gnutls_global_set_log_level(logLevel);
+
+    if (logLevel > 0)  
+        gnutls_global_set_log_function(nypr_gnutlsLog);
+
+
+    if (var_InheritBool(obj, NYPR_AUDITLOG_SWITCH))
+        gnutls_global_set_audit_log_function(nypr_gnutlsAuditLog);
+
     return 0;
+}
+
+static void nypr_gnutlsLog(int level, const char* log) {
+    msg_Dbg(globalContext, "nypr_gnutlsLog(@%d): %s", level, log);
+}
+
+static void nypr_gnutlsAuditLog(gnutls_session_t sess, const char* log) {
+    msg_Dbg(globalContext, "nypr_gnutlsAuditLog: %s", log);
 }
 
 static int gnutls_Error(vlc_tls_gnutls_t *priv, int val)
@@ -758,6 +788,16 @@ static void CloseServer (vlc_tls_creds_t *crd)
 #define PRIORITIES_LONGTEXT N_("Ciphers, key exchange methods, " \
     "hash functions and compression methods can be selected. " \
     "Refer to GNU TLS documentation for detailed syntax.")
+
+// if you invoke N_ here you must regenerate the gettext files... this is a hack so lets skipt that.
+#define NYPR_LOG_LEVEL_TEXT "Library internal logging handler level."
+#define NYPR_LOG_LEVEL_LONGTEXT \
+    "More information: https://gnutls.org/manual/html_node/Core-TLS-API.html#gnutls_005fglobal_005fset_005flog_005flevel."
+
+#define NYPR_AUDITLOG_TEXT "Library internal audit logging switch."
+#define NYPR_AUDITLOG_LONGTEXT \
+    "More information: https://gnutls.org/manual/html_node/Core-TLS-API.html#gnutls_005fglobal_005fset_005faudit_005flog_005ffunction-1."
+
 static const char *const priorities_values[] = {
     "PERFORMANCE",
     "NORMAL",
@@ -787,6 +827,10 @@ vlc_module_begin ()
     add_string ("gnutls-priorities", "NORMAL", PRIORITIES_TEXT,
                 PRIORITIES_LONGTEXT, false)
         change_string_list (priorities_values, priorities_text)
+
+    add_integer_with_range (NYPR_LOG_LEVEL_SWITCH, 0, 0, 99, NYPR_LOG_LEVEL_TEXT, NYPR_LOG_LEVEL_LONGTEXT, false)
+    add_bool (NYPR_AUDITLOG_SWITCH, false, NYPR_AUDITLOG_TEXT,
+             NYPR_AUDITLOG_LONGTEXT, true)
 #ifdef ENABLE_SOUT
     add_submodule ()
         set_description( N_("GNU TLS server") )
